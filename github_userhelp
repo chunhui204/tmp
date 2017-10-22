@@ -1,0 +1,14 @@
+github 是项目托管平台，git是版本管理工具，github是使用git进行版本管理的。
+本地通过ssh与远程仓库进行通信
+1.首先通过ssh-keygen生成ssh通信的密钥，包括公钥和私玥。文件在.ssh目录下，然后把公钥文件中hostname之前的内容复制到github中去，在github打开setting, ssh key,中add ssh key,这样就建立啦github和ＰＣ本地通信条件，因为通信的时候需要远程github提供公钥。
+２.然后安装git，git config --global user.name "chunhui204"
+		git config --global user.email "15866613796@163.com"
+		建立了git与github之间的联系.
+３. 可以通过git clone git_url，把仓库克隆到本地。
+4. 如果本地端修改，可以git add filename
+			git rm filename
+			git commit -m "info"
+			git push -u origin master
+push到远程仓库
+4. 通过git pull把远程仓库的修改拉到本地。
+
