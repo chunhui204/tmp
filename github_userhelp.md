@@ -1,7 +1,8 @@
 github 是项目托管平台，git是版本管理工具，github是使用git进行版本管理的。
 本地通过ssh与远程仓库进行通信
 ××××××××××××××××生成密钥，建立电脑和github账户之间的联系×××××××××××××××××
-1.首先通过ssh-keygen生成ssh通信的密钥，包括公钥和私玥。文件在.ssh目录下，然后把公钥文件中hostname之前的内容复制到github中去，在github打开setting, ssh key,中add ssh key,这样就建立啦github和ＰＣ本地通信条件，因为通信的时候需要远程github提供公钥。
+1.首先通过ssh-keygen生成ssh通信的密钥，包括公钥和私玥。文件在.ssh目录下，然后把公钥文件中hostname之前的内容复制到github中去，
+在github打开setting, ssh key,中add ssh key,这样就建立啦github和ＰＣ本地通信条件，因为通信的时候需要远程github提供公钥。
 ２.然后安装git，git config --global user.name "chunhui204"
 		git config --global user.email "15866613796@163.com"
 		建立了git与github之间的联系.
