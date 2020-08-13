@@ -22,8 +22,6 @@
 #import "SSCommonLogic+VideoPlayer.h"
 #import "TTVPlayerAdapterViewController+AudioModel.h"
 
-static const void *loopingKey = @"loopingTypeForAdapterPlayer";
-
 @interface TTVPlayerAdapterViewController ()
 
 @property (nonatomic, strong, readwrite) TTVPlayerEngineObserverState *engineObserverState;
@@ -448,16 +446,12 @@ static const void *loopingKey = @"loopingTypeForAdapterPlayer";
     return [self.playerVCtrl localURL];
 }
 
-- (TTVLoopingType)looping {
-    TTVLoopingType type;
-    NSValue* v = objc_getAssociatedObject(self, loopingKey);
-    [v getValue:&type];
-    return type;
+- (BOOL)looping {
+    return self.playerVCtrl.looping;
 }
 
-- (void)setLooping:(TTVLoopingType)looping {
-    self.playerVCtrl.looping = looping == TTVLoopingTypeSingle;
-     objc_setAssociatedObject(self, loopingKey, @(looping), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+- (void)setLooping:(BOOL)looping {
+    self.playerVCtrl.looping = looping;
 }
 
 - (void)setDirectPlayURL:(NSString *)directPlayURL {
@@ -481,6 +475,10 @@ static const void *loopingKey = @"loopingTypeForAdapterPlayer";
 
 #pragma mark - private method
 - (BOOL)canPlay {
+    //播放器回收复用，会延时使用closeAys节省播放器重置耗时，所以判断如果正在回收中，不能播放，重置完会重置该变量
+    if (self.isPlayerRecycling) {
+        return NO;
+    }
     if (self.viewModel.aID.integerValue != 0) {
         return YES;
     }
