@@ -642,11 +642,6 @@ static char kPlayerFunctionMainSwitchStoreVolumeStateKey;
     }
 }
 
-- (void)setHasSeries:(BOOL)hasSeries{
-    _hasSeries = hasSeries;
-    self.loopSettingView.hasSeries = hasSeries;
-}
-
 @end
 
 @interface TTPlayerLoopSettingView ()
@@ -718,26 +713,6 @@ static char kPlayerFunctionMainSwitchStoreVolumeStateKey;
         btn.selected = (btn.tag == loopingType);
         btn.userInteractionEnabled = !btn.selected;
         btn.titleLabel.font = btn.selected ? [UIFont systemFontOfSize:13.f weight:UIFontWeightSemibold]:[UIFont systemFontOfSize:13.f weight:UIFontWeightRegular];
-    }
-}
-
-- (void)setHasSeries:(BOOL)hasSeries{
-    _hasSeries = hasSeries;
-    if(hasSeries){
-        NSString* title = @"合集循环";
-        NSMutableArray* itemButtons = [self.selectionItemBtns mutableCopy];
-        UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-        [button setTitle:title forState:UIControlStateNormal];
-        [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        [button setTitleColor:[UIColor redColor] forState:UIControlStateSelected];
-        button.titleLabel.font = [UIFont systemFontOfSize:13.f weight:UIFontWeightSemibold];
-        [button addTarget:self action:@selector(onClick:) forControlEvents:UIControlEventTouchUpInside];
-        button.hitTestEdgeInsets = UIEdgeInsetsMake(-12, -12, -12, -12);
-        button.tag = itemButtons.count;
-        [button sizeToFit];
-        [self addSubview:button];
-        [itemButtons addObject:button];
-        self.selectionItemBtns = [itemButtons copy];
     }
 }
 
