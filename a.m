@@ -73,6 +73,7 @@
 #import "TTVVideoSettingsManager.h"
 #import "TTVPlayerPreloadManager.h"
 #import "TTVLTrackerPart.h"
+#import "TTVSettingsConfiguration.h"
 #import "XIGVideoProgressCacheManager.h"
 #import "TTVLoopingPlayManager.h"
 #import "TTVideoEngineModel.h"
@@ -81,6 +82,7 @@
 #import <XIGSettings/TTVideoOptimizeSettingsManager.h>
 #import "TTVideoResolutionService.h"
 #import "TTVPlayerManager.h"
+#import "TTVSeriesViewModel.h"
 
 @interface TTVPlayerAdapterView : UIView
 @property (nonatomic ,weak)UIView *topView;
@@ -108,6 +110,8 @@ NSString *const kTTPlayerViewControllerPlaybackStateDidChangedNotification = @"k
 @property (nonatomic, strong) NSMutableArray *playbackTimeObserversArray;
 @property (nonatomic, strong) NSMutableArray *zeroPointOnePlaybackTimeObserversArray;
 @property (nonatomic, assign) int64_t observerLoopCount;
+@property (nonatomic, strong) UIImage *watermarkFullImage;
+@property (nonatomic, strong) UIImage *watermarkImage;
 @property (nonatomic, assign) BOOL isVisible;
 @property (nonatomic, assign) BOOL hasAddPart;
 @property (nonatomic, strong) NSPointerArray *playerDelegates;
@@ -137,6 +141,7 @@ NSString *const kTTPlayerViewControllerPlaybackStateDidChangedNotification = @"k
 @end
 
 @implementation TTVPlayerAdapterViewController
+
 - (void)dealloc
 {
     if (!self.isLongVideo && self.playerVCtrl.looping) {
@@ -336,7 +341,6 @@ NSString *const kTTPlayerViewControllerPlaybackStateDidChangedNotification = @"k
 
     TTVFullScreenPart *screenPart = (TTVFullScreenPart *)[self.playerVCtrl partForKey:TTVPlayerPartKey_Full];
     screenPart.disableRotateFromeSuperView = [TTKitchen getBOOL:kVideoPlayerDisableRotateRemoveFromeSuperView];
-    screenPart.needsStrongOriginalParentViewController = [TTKitchen getBOOL:kVideoPlayerFullScreenPartUseStrongReference];
     
     if (self.isDashSource && !self.isFullScreen && [TTVideoOptimizeSettingsManager isSmallStateOptEnable] && !self.isLongVideo) {
         TTVideoEngineResolutionType resolution = [TTVideoResolutionService defaultResolutionType];
@@ -737,21 +741,27 @@ NSString *const kTTPlayerViewControllerPlaybackStateDidChangedNotification = @"k
         [self.accessLog clearEvent];
         
     }
-    
+    if(self.disableScrolling){
+        return;
+    }
     //沉浸式播放下一个
     BOOL enableAudioPlayNext = YES;
     if([self isInAudioMode] && [self enableTimeTask]) {
         BOOL countdownTime = [self currentVideoCountDown] > 0 ? YES : NO;
         enableAudioPlayNext = [self currentVideoIsSingleMode] ? NO : countdownTime;
     }
+    BOOL shouldSeriesAutoPlay = [TTVLoopingPlayManager.shared loopingTypeForGid:self.videoID] == TTVLoopingTypeMulti;
     
-    if ([self.immersePlayerInteracter canAutoPlayNext] &&
+//    isStoryMode = self.delegate.class == [ttvfeedimmersepagecon]
+    if ((shouldSeriesAutoPlay
+         || [self.immersePlayerInteracter canAutoPlayNext]) &&
         self.immersePlayerViewController.startImmersePlay &&
         (status.type == TTVPlayFinishStatusType_SystemFinish && status.playError == nil) &&
         //无网络
-        error.code != -106 && !self.looping && enableAudioPlayNext) {
+        error.code != -106 && self.looping != TTVLoopingTypeSingle && enableAudioPlayNext) {
         [self.immersePlayerInteracter playNextIfNeed];
     }
+    
 }
 
 - (void)setLogoImage:(UIImage *)image{
@@ -1096,7 +1106,7 @@ NSString *const kTTPlayerViewControllerPlaybackStateDidChangedNotification = @"k
         resolution =[TTVideoResolutionService suitableResolutionForCurrentVideoResolutions:self.videoInfo.supportedResolutionTypes];
     }
     TTVFullScreenPart *screenPart = (TTVFullScreenPart *)[self.playerVCtrl partForKey:TTVPlayerPartKey_Full];
-    if (self.isDashSource && !self.isFullScreen && [TTVideoOptimizeSettingsManager isSmallStateOptEnable] && !self.isLongVideo && TTVideoEngineResolutionTypeAuto != resolution && ttvs_videoABRConfig() <= 0) {
+    if (self.isDashSource && !self.isFullScreen && [TTVideoOptimizeSettingsManager isSmallStateOptEnable] && !self.isLongVideo && TTVideoEngineResolutionTypeAuto != resolution && ttvs_videoABRConfig() == 0) {
         screenPart.needSmallScreenOpt = YES;
         screenPart.normalResolution = (TTVPlayerResolutionTypes)resolution;
         TTVideoEngineResolutionType smallStateResolution = [TTVideoOptimizeSettingsManager smallStateResolution];
@@ -1245,16 +1255,21 @@ NSString *const kTTPlayerViewControllerPlaybackStateDidChangedNotification = @"k
         }
     }];
     if (!self.isLongVideo) {
-        TTVLoopingType loopingType = [TTVLoopingPlayManager.shared loopingTypeForGid:self.videoID];
-        self.looping = (loopingType == TTVLoopingTypeSingle);
+        TTVSeriesViewModel *viewModel = objc_getAssociatedObject(self, "TTVSeriesViewModel");
+        if(viewModel){
+            NSString *seriesId = [viewModel.pseriesId stringValue];
+            [TTVLoopingPlayManager.shared assignVideoId:self.videoID SeriesId:seriesId];
+            TTVLoopingType loopingType = [TTVLoopingPlayManager.shared loopingTypeForGid:self.videoID];
+            self.looping = loopingType;
         [TTVLoopingPlayManager.shared setLoopingType:loopingType forGid:self.videoID trackParams:nil trackDataSource:self byClick:NO];
+        }
     }
 }
 
 - (void)playerReadyToPlay:(TTVPlayer *)player {
     [[self.playerDelegates allObjects] enumerateObjectsUsingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
-        if (obj && [obj respondsToSelector:@selector(playerEngineReadyToPlay:)]) {
-            [obj playerEngineReadyToPlay:self];
+        if (obj && [obj respondsToSelector:@selector(playerReadyToPlay:)]) {
+            [obj playerReadyToPlay:self];
         }
     }];
 }
@@ -1456,31 +1471,6 @@ NSString *const kTTPlayerViewControllerPlaybackStateDidChangedNotification = @"k
 
 - (void)p_observeSmallScreenNotification{
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(p_smallScreen:) name:kVideoPlayerNeedSmallScreenNotification object:nil];
-}
-#pragma mark -
-#pragma mark resetPlayer
-- (void)resetPlayer{
-    if (!self.isLongVideo && self.playerVCtrl.looping) {
-        [[TTVLoopingPlayManager shared] autoExitLoopingForGid:self.videoID trackParams:[self trackParamsForLoopingPlayExit]];
-    }
-    [self removeVideoPreloadModel];
-    //复用前清空回调数组
-    [_readyCallbacks removeAllObjects];
-    [self.hookPlaybackBlockAfter removeAllObjects];
-    [self.hookPlaybackBlockBefore removeAllObjects];
-    [self.playbackTimeObserversArray removeAllObjects];
-    [self.zeroPointOnePlaybackTimeObserversArray removeAllObjects];
-    [self removePlayerScreenCastDelegates];
-    self.playerDelegates.count = 0;
-    self.effectivePlayDuration = 10;
-    [self resetVideoEngine];
-    //如果是音频模式，重置一下
-    if (self.playerVCtrl.playerState.audioModeState.turnOn) {
-        [self.playerVCtrl.playerStore dispatch:[TTVPlayerAction actionWithType:TTVPlayerActionType_AudioBack info:nil]];
-    }
-    [self clearZoomState];
-    //重置TTVPlayer播放器
-    [self.playerVCtrl.playerStore dispatch:[[TTVReduxAction alloc] initWithType:TTVPlayerActionType_NewVideo info:nil]];
 }
 #pragma mark -
 #pragma mark private methods
