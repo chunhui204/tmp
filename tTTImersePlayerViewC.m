@@ -89,6 +89,8 @@ NSString * const TTImmersePlayerViewControllerNewStylePromptKey = @"TTImmersePla
 
 @property (nonatomic, strong) TTVideoFPSMonitor *fpsMonitor;
 
+@property (nonatomic, assign) NSInteger scrolledPosition;
+
 @end
 
 @implementation TTImmersePlayerViewController
@@ -993,7 +995,7 @@ Settings enable_adjust_from_side开关为NO
         isAd = (playerModel.orginalModel.tt_adId.longLongValue > 0);
     }
     #define countdownTipTag_DidShow 100
-    if ([viewModel.showTip boolValue] && !isAd && ![self p_usedPlayer].looping) {
+    if ([viewModel.showTip boolValue] && !isAd && [self p_usedPlayer].looping != TTVLoopingTypeSingle) {
         if (self.countdownTip.tag != countdownTipTag_DidShow) {
             self.countdownTip.tag = countdownTipTag_DidShow;
             [self.countdownTip showInPlayerVC:[self p_usedPlayer]];
@@ -1442,11 +1444,17 @@ Settings enable_adjust_from_side开关为NO
                     }
                 }
                 
-                if (index + 1 >= models.count || index == NSNotFound) {
+                BOOL shouldSeriesPlay = [TTVLoopingPlayManager.shared loopingTypeForGid:((TTImmersePlayerModel*)currentModel).orginalModel.tt_videoID];
+                
+                if ((!shouldSeriesPlay && index + 1 >= models.count) || index == NSNotFound) {
                     return;
                 }
-
+                
                 NSUInteger realNextModelIndex = index + 1;
+                
+                if(shouldSeriesPlay && realNextModelIndex >= models.count){
+                    realNextModelIndex = 0;
+                }
                 
                 if (realNextModelIndex >= models.count) {
                     return;
@@ -1676,6 +1684,23 @@ Settings enable_adjust_from_side开关为NO
     if ([SSCommonLogic preloadVideoEnabled]) {
         [self startPreload];
     }
+    if(self.playerViewController.looping == TTVLoopingTypeMulti){
+        if(self.scrolledPosition == 1){
+            [self.listAdapter scrollToObject:self.listAdapter.objects.lastObject
+            supplementaryKinds:nil
+               scrollDirection:UICollectionViewScrollDirectionVertical
+                scrollPosition:UICollectionViewScrollPositionCenteredVertically
+                      animated:YES];
+        }
+        else if(self.scrolledPosition == 2){
+            [self.listAdapter scrollToObject:self.listAdapter.objects.firstObject
+            supplementaryKinds:nil
+               scrollDirection:UICollectionViewScrollDirectionVertical
+                scrollPosition:UICollectionViewScrollPositionCenteredVertically
+                      animated:YES];
+        }
+        self.scrolledPosition = 0;
+    }
     [self p_updateCurrentSectionController];
 }
 
@@ -1714,7 +1739,16 @@ Settings enable_adjust_from_side开关为NO
 }
 
 - (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
-    if (![self.viewModel.hasMore boolValue]){
+    self.scrolledPosition = 0;
+    if(self.playerViewController.looping == TTVLoopingTypeMulti){
+        if(CGRectGetMinY(self.collectionView.bounds) < 0){
+            self.scrolledPosition = 1;
+        }
+        else if(CGRectGetMaxY(self.collectionView.bounds) >= self.collectionView.contentSize.height){
+            self.scrolledPosition = 2;
+        }
+    }
+    else if (![self.viewModel.hasMore boolValue]){
         if (CGRectGetMaxY(self.collectionView.bounds) >= self.collectionView.contentSize.height &&
             !self.toastShowing) {
             self.toastShowing = YES;
