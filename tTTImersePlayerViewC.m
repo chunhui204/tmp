@@ -1,570 +1,744 @@
 //
-//  TTVPlayerAdapterViewController+VideoEngine.m
+//  TTPlayerFullScreenMoreMenuView.m
 //  Article
 //
-//  Created by 戚宽 on 2019/8/12.
+//  Created by bifangao on 2019/7/12.
 //
 
-#import "TTVPlayerAdapterViewController+VideoEngine.h"
-#import "TTVPlayerAdapterViewController+Internal.h"
-#import "TTVPlayerAdapterViewController+Controls.h"
-#import "TTVPlayerAdapterViewController+Tracker.h"
-#import "TTVPlayerAdapterViewController+Danmaku.h"
+#import "TTPlayerFullScreenMoreMenuView.h"
+#import <TTBaseLib/UIImageAdditions.h>
+//#import "TTVLPlayerDownloadView.h"
+#import "TTVAlbumUtil.h"
+#import "TTIndicatorView.h"
+#import "NetworkUtilities.h"
+#import <XIGUIKit/TTAnimationButton.h>
+#import "TTAnimationButton+AnimationTitle.h"
+#import "TTVAlbum+Extension.h"
 #import "TTSettingsManager.h"
+#import "TTVLongVideoHeaders.h"
+#import "UIImage+TTVLImage.h"
+#import "TTPlayerFunctionMainSwitch.h"
+#import <objc/runtime.h>
+#import <XIGUIKit/UIFont+TTFont.h>
+#import "UIImage+TTVHelper.h"
 #import "TTVSettingsConfiguration.h"
-#import <BDScreenCast/BDScreenCastAdapter.h>
-#import "TTVPlayerAdapterViewController+ScreenCast.h"
-#import "TTVPlayerQosTrackerPart.h"
-#import "TTVPlayerAction+Extension.h"
-#import <TTVPlayerPod/TTVPlayer+Engine.h>
-#import <TTVPlayerPod/TTVPlayer+Part.h>
-#import <TTVPlayerPod/TTVFreeZoomingPart.h>
-#import "SSCommonLogic+VideoPlayer.h"
-#import "TTVPlayerAdapterViewController+AudioModel.h"
+#import <ByteDanceKit/UIDevice+BTDAdditions.h>
+#import "TTVLoopingPlayManager.h"
 
-@interface TTVPlayerAdapterViewController ()
+@interface TTPlayerFullScreenMoreMenuItem : NSObject
+@property (nonatomic, strong) UIButton *button;
+@property (nonatomic, strong) UILabel *label;
+@property (nonatomic, getter=isHidden) BOOL hidden;
+@end
 
-@property (nonatomic, strong, readwrite) TTVPlayerEngineObserverState *engineObserverState;
-@property (nonatomic, strong, readonly) NSHashTable<id<TTVPlayerEngineBehaviorProtocol>> *engineBehaviorObservers;
+@implementation TTPlayerFullScreenMoreMenuItem
+
+- (void)setHidden:(BOOL)hidden {
+    self.button.hidden = hidden;
+    self.label.hidden = hidden;
+}
+
+- (BOOL)isHidden {
+    return self.button.isHidden && self.label.isHidden;
+}
 
 @end
 
-@implementation TTVPlayerAdapterViewController (VideoEngine)
+@interface TTPlayerFullScreenMoreMenuView ()
+@property (nonatomic, assign) CGFloat itemSpaceX; // 水平间距
+@property (nonatomic, strong) NSMutableArray<TTPlayerFullScreenMoreMenuItem *> *moreMenuItems;
+@property (nonatomic, strong) TTPlayerFullScreenMoreMenuItem *audioPlayItem;
+@property (nonatomic, strong) TTPlayerFullScreenMoreMenuItem *videoDownloadItem;
+@property (nonatomic, strong) TTPlayerFullScreenMoreMenuItem *danmakuSettingItem;
+@property (nonatomic, strong) TTPlayerFullScreenMoreMenuItem *dislikeItem;
 
-- (TTVideoEngine *)videoEngine{
-    if ([self.playerVCtrl respondsToSelector:@selector(videoEngine)]) {
-        return [self.playerVCtrl valueForKey:@"videoEngine"];
+@property (nonatomic, strong) UISlider *volumeSlider;
+@property (nonatomic, strong) UISlider *brightnessSlider;
+@property (nonatomic, strong) UIButton *downloadBtn;
+@property (nonatomic, strong) UIButton *collectNormalBtn;
+@property (nonatomic, strong) TTAnimationButton *collectBtn;
+@property (nonatomic, strong) UIButton *shareBtn;
+@property (nonatomic, strong) UILabel *collectLabel;
+@property (nonatomic, strong) UIButton *noEdgeBtn;
+@property (nonatomic, strong) UILabel *noEdgeBtnLabel;
+@property (nonatomic, strong) UIButton *audioPlayBtn;
+@property (nonatomic, strong) UILabel *audioPlayBtnLabel;
+@property (nonatomic, strong) UIButton *videoDownloadBtn;
+@property (nonatomic, strong) UILabel *videoDownloadBtnLabel;
+@property (nonatomic, strong) UIButton *danmakuSettingButton;
+@property (nonatomic, strong) UIButton *eiBtn;
+@property (nonatomic, strong) UILabel *shareLabel;
+@property (nonatomic, strong) UILabel *danmakuSettingLabel;
+@property (nonatomic, strong) UILabel *eiBtnLabel;
+@property (nonatomic, strong) UIView *sepLine;
+@property (nonatomic, strong) UIImageView *volumeLowImageView;
+@property (nonatomic, strong) UIImageView *volumeHighImageView;
+@property (nonatomic, strong) UIImageView *brightnessLowImageView;
+@property (nonatomic, strong) UIImageView *brightnessHighImageView;
+@property (nonatomic, strong) TTPlayerLoopSettingView *loopSettingView;
+
+@end
+
+@implementation TTPlayerFullScreenMoreMenuView
+
+#define PaddingX 30
+#define PaddingY 28
+#define itemSpaceY 30
+#define ButtonSize 24
+- (void)layoutButton:(UIButton *)button label:(UILabel *)label withIndex:(NSInteger)index {
+    NSInteger row = index / 5;
+    NSInteger column = index % 5;
+    CGFloat rate = [UIDevice btd_isScreenWidthLarge320] ? 1.f : 0.9f;
+    button.frame = CGRectMake(PaddingX + column * (ButtonSize + self.itemSpaceX),
+                              PaddingY * rate + row * (ButtonSize + 6 + 18 + 26 * rate),
+                              ButtonSize,
+                              ButtonSize);
+    [label sizeToFit];
+    label.height = 18;
+    label.centerX = button.centerX;
+    label.top = button.bottom + 6;
+}
+
+- (UIButton *)buttonWithTitle:(NSString *)title image:(UIImage *)image action:(SEL)action {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.backgroundColor = [UIColor clearColor];
+    button.hitTestEdgeInsets = UIEdgeInsetsMake(-10, -10, -20, -10);
+    if (title) {
+        [button setTitle:title forState:UIControlStateNormal];
     }
-    return nil;
-}
-
-#pragma mark - readonly property
-- (NSTimeInterval)duration {
-    return self.playerVCtrl.duration;
-}
-
-- (NSTimeInterval)currentPlaybackTime {
-    return self.playerVCtrl.playbackTime.currentPlaybackTime;
-}
-
-- (NSTimeInterval)playableDuration {
-    return self.playerVCtrl.playableDuration;
-}
-
-- (NSTimeInterval)durationWatched {
-    return self.playerVCtrl.durationWatched;
-}
-
-- (UIView *)playerView {
-    return self.playerVCtrl.playerView;
-}
-
-- (TTVideoEngineResolutionType)currentResolution {
-    return (TTVideoEngineResolutionType)self.playerVCtrl.currentResolution;
-}
-
-- (TTVideoEngineResolutionType)currentShowingResolution {
-    if (self.playerVCtrl.playerState.resolutionState.fakeAutoResolutionSelected) {
-        return TTVideoEngineResolutionTypeAuto;
+    if (image) {
+        [button setImage:image forState:UIControlStateNormal];
     }
-    return [self currentResolution];
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
 }
 
-- (void)setCustomResolutionMap:(NSDictionary *)resolutionMap {
-    self.playerVCtrl.resolutionMap = resolutionMap;
+- (UILabel *)labelWithText:(NSString *)text {
+    UILabel *label = [[UILabel alloc] init];
+    label.text = text;
+    label.font = [UIFont systemFontOfSize:13.f weight:UIFontWeightRegular];
+    label.textColor = [UIColor tt_W4_color];
+    label.textAlignment = NSTextAlignmentCenter;
+    return label;
 }
 
-- (TTVideoEngineLoadState)loadState {
-    return (TTVideoEngineLoadState)self.playerVCtrl.loadState;
+- (TTPlayerFullScreenMoreMenuItem *)addMoreMenuItem:(UIButton *)button label:(UILabel *)label {
+    if (button) {
+        [self addSubview:button];
+    }
+    if (label) {
+        [self addSubview:label];
+    }
+    TTPlayerFullScreenMoreMenuItem *item = [[TTPlayerFullScreenMoreMenuItem alloc] init];
+    item.button = button;
+    item.label = label;
+    [self.moreMenuItems addObject:item];
+    return item;
 }
 
-- (TTVideoEnginePlaybackState)playbackState {
-    return (TTVideoEnginePlaybackState)self.playerVCtrl.playbackState;
+#pragma mark - life cycle
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (self = [super initWithFrame:frame]) {
+        self.backgroundColor = [UIColor colorWithWhite:0 alpha:.87f];
+        self.scrollEnabled = YES;
+        _itemSpaceX = (CGRectGetWidth(frame) - PaddingX * 2 - ButtonSize * 5) / 4;
+        _moreMenuItems = [NSMutableArray array];
+        if (@available(iOS 11.0, *)) {
+            self.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+        }
+        
+        // 分享
+        UIButton *shareBtn = [self buttonWithTitle:nil image:[UIImage xigBizPlayerImageNamed:@"player_fullscreen_share"] action:@selector(shareAction:)];
+        UILabel *shareLabel = [self labelWithText:@"分享"];
+        [self addMoreMenuItem:shareBtn label:shareLabel];
+        self.shareBtn = shareBtn;
+        self.shareLabel = shareLabel;
+        
+        // 收藏
+        TTAnimationButton *collectBtn = [TTAnimationButton buttonWithType:UIButtonTypeCustom];
+        collectBtn.backgroundColor = [UIColor clearColor];
+        collectBtn.hitTestEdgeInsets = UIEdgeInsetsMake(-10, -10, -20, -10);
+        collectBtn.explosionRate = 50;
+        collectBtn.imageNormalColor = [UIColor tt_silver5Color];
+        collectBtn.imageSelectedColor = [UIColor tt_yellow1Color];
+        [collectBtn setImage:[UIImage xigBizPlayerImageNamed:@"player_uncollect"] forState:UIControlStateNormal];
+        [collectBtn setImage:[UIImage xigBizPlayerImageNamed:@"player_collected"] forState:UIControlStateSelected];
+        [collectBtn addTarget:self action:@selector(collectAction:) forControlEvents:UIControlEventTouchUpInside];
+        self.collectBtn = collectBtn;
+        [self addSubview:collectBtn];
+        self.collectBtn.hidden = YES;
+        // 动画按钮会为按钮图片区域填充颜色，此处非选中态要求图片镂空显示，所以添加一个按钮显示非选中态，选中态及选中动画使用animationButton
+        UIButton *collectNormalBtn = [self buttonWithTitle:nil image:[UIImage xigBizPlayerImageNamed:@"player_uncollect"] action:@selector(collectAction:)];
+        [collectNormalBtn setImage:[UIImage xigBizPlayerImageNamed:@"player_collected"] forState:UIControlStateSelected];
+        UILabel *collectLabel = [self labelWithText:@"收藏"];
+        collectLabel.highlightedTextColor = [UIColor colorWithRed:254.0/255.0 green:148.0/255.0 blue:0/255.0 alpha:1];
+        [self addMoreMenuItem:collectNormalBtn label:collectLabel];
+        self.collectNormalBtn = collectNormalBtn;
+        self.collectLabel = collectLabel;
+        [collectBtn mas_makeConstraints:^(MASConstraintMaker *make) {
+            make.edges.mas_equalTo(collectNormalBtn);
+        }];
+        
+        // 下载
+        UIButton *downloadBtn = [self buttonWithTitle:nil image:[UIImage xigBizPlayerImageNamed:@"player_download"] action:@selector(downloadAction:)];
+        UILabel *downloadLabel = [self labelWithText:@"缓存"];
+        [self addMoreMenuItem:downloadBtn label:downloadLabel];
+        self.downloadBtn = downloadBtn;
+        
+        // 弹幕设置
+        UIButton *danmakuSettingButton = [self buttonWithTitle:nil image:[UIImage xigBizPlayerImageNamed:@"player_danmaku_setting"] action:@selector(danmakuSettingTouchUpInside:)];
+        UILabel *danmakuSettingLabel = [self labelWithText:@"弹幕设置"];
+        self.danmakuSettingItem = [self addMoreMenuItem:danmakuSettingButton label:danmakuSettingLabel];
+        self.danmakuSettingButton = danmakuSettingButton;
+        self.danmakuSettingLabel = danmakuSettingLabel;
+        
+        // 不感兴趣
+        UIButton *noInterestBtn = [self buttonWithTitle:nil image:[UIImage xigBizPlayerImageNamed:@"player_fullscreen_dislike"] action:@selector(dislikeBtnAction:)];
+        UILabel *noInterestLabel = [self labelWithText:@"不感兴趣"];
+        self.dislikeItem = [self addMoreMenuItem:noInterestBtn label:noInterestLabel];
+        
+        // 举报
+        UIButton *reportBtn = [self buttonWithTitle:nil image:[UIImage xigBizPlayerImageNamed:@"player_fullscreen_report"] action:@selector(reportBtnAction:)];
+        UILabel *reportLabel = [self labelWithText:@"举报"];
+        [self addMoreMenuItem:reportBtn label:reportLabel];
+        
+        // 满屏
+        UIButton *noEdgeBtn = [self buttonWithTitle:nil image:[UIImage xigBizPlayerImageNamed:@"player_fullscreen_zoomIn"] action:@selector(noEdgeAction:)];
+        [noEdgeBtn setImage:[[UIImage xigBizPlayerImageNamed:@"player_fullscreen_zoomIn"] ttv_imageWithTintColor:[UIColor tt_R1_color]] forState:UIControlStateSelected];
+        UILabel *noEdgeBtnLabel = [self labelWithText:@"满屏"];
+        noEdgeBtnLabel.highlightedTextColor = [UIColor tt_R1_color];
+        [self addMoreMenuItem:noEdgeBtn label:noEdgeBtnLabel];
+        self.noEdgeBtn = noEdgeBtn;
+        self.noEdgeBtnLabel = noEdgeBtnLabel;
+        
+        //音频播放按钮
+        UIButton *audioPlayBtn = [self buttonWithTitle:nil image:[UIImage imageNamed:@"audioModePlay22"] action:@selector(audioModePlayAction:)];
+        [audioPlayBtn setImage:[[UIImage imageNamed:@"audioPlayModeSel"] ttv_imageWithTintColor:[UIColor tt_R1_color]] forState:UIControlStateSelected];
+        UILabel *audioPlayBtnLabel = [self labelWithText:@"音频播放"];
+        audioPlayBtnLabel.highlightedTextColor = [UIColor tt_R1_color];
+        self.audioPlayItem = [self addMoreMenuItem:audioPlayBtn label:audioPlayBtnLabel];
+        self.audioPlayItem.hidden = !ttvs_enableAudioPlayMode();
+        self.audioPlayBtn = audioPlayBtn;
+        self.audioPlayBtnLabel = audioPlayBtnLabel;
+        
+        //播放反馈
+        UIButton *feedbackBtn = [self buttonWithTitle:nil image:[UIImage imageNamed:@"video_feedback_btn"] action:@selector(feedBackAction:)];
+        UILabel *feedbackBtnLabel = [self labelWithText:@"播放反馈"];;
+        [self addMoreMenuItem:feedbackBtn label:feedbackBtnLabel];
+        
+        //保存到相册
+        NSDictionary *shareposterConfig = [[TTSettingsManager sharedManager] settingForKey:@"ug_share_config" defaultValue:@{} freeze:NO];
+        BOOL isShowSharePanelDownload = [shareposterConfig btd_intValueForKey:@"share_panel_video_download_switch_position" default:0];
+        if(!isShowSharePanelDownload){
+            //未把保存到相册放到分享逻辑里
+            UIButton *videoDownloadBtn = [self buttonWithTitle:nil image:[UIImage imageNamed:@"audio_download_enable"] action:@selector(videoDownloadAction:)];
+            UILabel *videoDownloadBtnLabel = [self labelWithText:@"保存到相册"];
+            videoDownloadBtnLabel.highlightedTextColor = [UIColor tt_R1_color];
+            self.videoDownloadItem = [self addMoreMenuItem:videoDownloadBtn label:videoDownloadBtnLabel];
+
+            self.videoDownloadItem.hidden = ![shareposterConfig btd_intValueForKey:@"share_panel_video_download_enable" default:0];
+            self.videoDownloadBtn = videoDownloadBtn;
+            self.videoDownloadBtnLabel = videoDownloadBtnLabel;
+        }
+        
+        //视频debug信息
+        if ([TTMacroManager isInHouse]) {
+            UIButton *eiBtn = [self buttonWithTitle:@"EI" image:nil action:@selector(eiBtnAction:)];
+            [eiBtn setTitleColor:[UIColor redColor] forState:UIControlStateSelected];
+            UILabel *eiBtnLabel = [self labelWithText:@"EI"];
+            [self addMoreMenuItem:eiBtn label:eiBtnLabel];
+            self.eiBtn = eiBtn;
+            self.eiBtnLabel = eiBtnLabel;
+        }
+        
+        self.sepLine = [[UIView alloc] init];
+        self.sepLine.backgroundColor = UIColorWithRGBA(216, 216, 216, 0.12);
+        [self addSubview:self.sepLine];
+
+        if (TTVLoopingPlayManager.shared.enable) {
+            TTPlayerLoopSettingView *loopSettingView = [[TTPlayerLoopSettingView alloc] initWithFrame:CGRectZero];
+            [self addSubview:loopSettingView];
+            self.loopSettingView = loopSettingView;
+        }
+        
+        // 声音
+        self.volumeLowImageView = [[UIImageView alloc] init];
+        self.volumeLowImageView.image = [UIImage xigBizPlayerImageNamed:@"player_volume_weak"];
+        [self addSubview:self.volumeLowImageView];
+        
+        self.volumeHighImageView = [[UIImageView alloc] init];
+        self.volumeHighImageView.image = [UIImage xigBizPlayerImageNamed:@"player_volume_strong"];
+        [self addSubview:self.volumeHighImageView];
+        
+        self.volumeSlider = [[UISlider alloc] init];
+        self.volumeSlider.maximumValue = 1.f;
+        self.volumeSlider.minimumTrackTintColor = [UIColor redColor];
+        self.volumeSlider.maximumTrackTintColor = [UIColor colorWithWhite:1.f alpha:.1f];
+        [self.volumeSlider addTarget:self action:@selector(volumeDidChanged:) forControlEvents:UIControlEventValueChanged];
+        [self.volumeSlider addTarget:self action:@selector(volumeEndChanged:) forControlEvents:UIControlEventTouchUpInside];
+        [self.volumeSlider setThumbImage:[UIImage imageWithSize:CGSizeMake(16, 16) cornerRadius:8 backgroundColor:[UIColor whiteColor]] forState:UIControlStateNormal];
+        [self.volumeSlider setThumbImage:[UIImage imageWithSize:CGSizeMake(16, 16) cornerRadius:8 backgroundColor:[UIColor whiteColor]] forState:UIControlStateHighlighted];
+        self.volumeSlider.hitTestEdgeInsets = UIEdgeInsetsMake(-5, -10, -5, -10);
+        [self addSubview:self.volumeSlider];
+        
+        // 亮度
+        self.brightnessLowImageView = [[UIImageView alloc] init];
+        self.brightnessLowImageView.image = [UIImage xigBizPlayerImageNamed:@"player_brightness_weak"];
+        [self addSubview:self.brightnessLowImageView];
+        [self.brightnessLowImageView sizeToFit];
+        
+        self.brightnessHighImageView = [[UIImageView alloc] init];
+        self.brightnessHighImageView.image = [UIImage xigBizPlayerImageNamed:@"player_brightness_strong"];
+        [self.brightnessHighImageView sizeToFit];
+        [self addSubview:self.brightnessHighImageView];
+        
+        self.brightnessSlider = [[UISlider alloc] init];
+        self.brightnessSlider.maximumValue = 1.f;
+        self.brightnessSlider.minimumTrackTintColor = [UIColor redColor];
+        self.brightnessSlider.maximumTrackTintColor = [UIColor colorWithWhite:1.f alpha:.1f];
+        [self.brightnessSlider addTarget:self action:@selector(brightnessDidChanged:) forControlEvents:UIControlEventValueChanged];
+        [self.brightnessSlider addTarget:self action:@selector(brightnessEndChanged:) forControlEvents:UIControlEventTouchUpInside];
+        [self.brightnessSlider setThumbImage:[UIImage imageWithSize:CGSizeMake(16, 16) cornerRadius:8 backgroundColor:[UIColor whiteColor]] forState:UIControlStateNormal];
+        [self.brightnessSlider setThumbImage:[UIImage imageWithSize:CGSizeMake(16, 16) cornerRadius:8 backgroundColor:[UIColor whiteColor]] forState:UIControlStateHighlighted];
+        self.brightnessSlider.hitTestEdgeInsets = UIEdgeInsetsMake(-5, -10, -5, -10);
+        [self addSubview:self.brightnessSlider];
+    }
+    return self;
 }
 
-- (TTVideoEngineState)state {
-    return (TTVideoEngineState)self.playerVCtrl.state;
-}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    
+    NSArray<TTPlayerFullScreenMoreMenuItem *> *visiableItems = [self.moreMenuItems btd_filter:^BOOL(TTPlayerFullScreenMoreMenuItem * _Nonnull obj) {
+        return !obj.hidden;
+    }];
+    [visiableItems enumerateObjectsUsingBlock:^(TTPlayerFullScreenMoreMenuItem * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        [self layoutButton:obj.button label:obj.label withIndex:idx];
+    }];
+    
+    CGFloat rate = [UIDevice btd_isScreenWidthLarge320] ? 1.f : 0.9f;
+    
+    CGFloat sepLinTop = visiableItems.lastObject.label.bottom + 28 * rate;
+    self.sepLine.frame = CGRectMake(0, sepLinTop, self.width, [UIDevice btd_onePixel]);
 
-- (BOOL)shouldPlay {
-    return self.playerVCtrl.shouldPlay;
-}
-
-- (TTVideoEngineAVPlayerItemAccessLog *)accessLog {
-    return [self videoEngine].accessLog;
-}
-
-- (TTVideoEngineScalingMode)scaleMode {
-    TTVFreeZoomingPart *freeZooming = (id) [self.playerVCtrl partForKey:TTVPlayerPartKey_FreeZooming];
-    if (freeZooming) {
-        // Players with free zooming enabled is not using the engine's scale ability.
-        return freeZooming.preferredAspectFill
-            ? TTVideoEngineScalingModeAspectFill : TTVideoEngineScalingModeNone;
+    CGFloat left = PaddingX;
+    CGFloat y = self.sepLine.bottom;
+    if (self.loopSettingView) {
+        self.loopSettingView.left = 0;
+        self.loopSettingView.top = y;
+        self.loopSettingView.width = self.width;
+        self.loopSettingView.height = 60 * rate;
+        y = self.loopSettingView.centerY + 40 * rate;
+    } else {
+        y += 40 * rate;
     }
     
-    return [self videoEngine].scaleMode;
+    // 声音
+    self.volumeLowImageView.frame = CGRectMake(left, y, 24, 24);
+    self.volumeHighImageView.frame = CGRectMake(self.width - left - 24, self.volumeLowImageView.top, 24, 24);
+    CGFloat sliderWidth = self.width - (self.volumeLowImageView.right + 14) * 2;
+    self.volumeSlider.size = CGSizeMake(sliderWidth, 16);
+    self.volumeSlider.centerX = self.width/2;
+    self.volumeSlider.centerY = self.volumeLowImageView.centerY;
+    
+    // 亮度
+    self.brightnessLowImageView.frame = CGRectMake(self.volumeLowImageView.left, self.volumeLowImageView.bottom + 28 * rate, 24, 24);
+    self.brightnessHighImageView.frame = CGRectMake(self.width - left - 24, self.brightnessLowImageView.top, 24, 24);
+    self.brightnessSlider.size = CGSizeMake(sliderWidth, 16);
+    self.brightnessSlider.centerX = self.width/2;
+    self.brightnessSlider.centerY = self.brightnessLowImageView.centerY;
+    
+    self.contentSize = CGSizeMake(0, self.brightnessLowImageView.bottom + PaddingY);
 }
 
-- (NSInteger)biterate{
-    return self.playerVCtrl.biterate;
-}
-#pragma mark - readwrite property
-- (void)setIsDashSource:(BOOL)isDashSource {
-    objc_setAssociatedObject(self, @selector(isDashSource), @(isDashSource), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-- (BOOL)isDashSource {
-    return [objc_getAssociatedObject(self,@selector(isDashSource)) boolValue];
+- (void)setIsZoomming:(BOOL)isZoomming
+{
+    _isZoomming = isZoomming;
+    self.noEdgeBtn.selected = isZoomming;
+    self.noEdgeBtnLabel.highlighted = self.noEdgeBtn.selected;
 }
 
-- (void)setSettingsBlock:(TTVPlayerSettingsBlock)settingsBlock{
-    objc_setAssociatedObject(self, @selector(settingsBlock), settingsBlock, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+- (void)setIsEIShowing:(BOOL)isEIShowing {
+    _isEIShowing = isEIShowing;
+    self.eiBtn.selected = isEIShowing;
 }
 
-- (TTVPlayerSettingsBlock)settingsBlock{
-    return objc_getAssociatedObject(self, @selector(settingsBlock));
+- (void)setDisableZoomming:(BOOL)disableZoomming
+{
+    _disableZoomming = disableZoomming;
+    [[TTVAlbumUtil sharedInstance] setButton:self.noEdgeBtn disabled:disableZoomming action:^{
+        if (disableZoomming) {
+            [TTIndicatorView showWithIndicatorStyle:TTIndicatorViewStyleImage indicatorText:@"本视频暂不支持满屏" indicatorImage:nil autoDismiss:YES dismissHandler:nil];
+        }
+    }];
 }
 
-- (BOOL)h265Enabled {
-    return self.playerVCtrl.h265Enabled;
+- (void)setCollected:(BOOL)collected{
+    _collected = collected;
+    [self refreshButtonState];
 }
 
-- (BOOL)muted {
-    return self.playerVCtrl.muted;
+- (void)setDisableDownload:(BOOL)disableDownload{
+    _disableDownload = disableDownload;
+    [self refreshButtonState];
 }
 
-- (void)setMuted:(BOOL)muted {
-    self.playerVCtrl.muted = muted;
+- (void)setLoopingType:(NSInteger)loopingType {
+    self.loopSettingView.loopingType = loopingType;
 }
 
-- (CGFloat)playbackSpeed {
-    return self.playerVCtrl.playbackSpeed;
+- (void)setLoopingTypeChanged:(void (^)(NSInteger))loopingTypeChanged {
+    self.loopSettingView.loopingTypeChanged = loopingTypeChanged;
 }
 
-- (void)setPlaybackSpeed:(CGFloat)playbackSpeed {
-    [self.playerVCtrl.playerStore dispatch:[self.playerVCtrl.playerAction changeSpeedToAction:playbackSpeed shouldShowSpeedTip:NO]];
+- (void)setDisableDanmakuSetting:(BOOL)disableDanmakuSetting {
+    _disableDanmakuSetting = disableDanmakuSetting;
+    self.danmakuSettingItem.hidden = disableDanmakuSetting;
+    [self setNeedsLayout];
 }
 
-- (void)setPlaybackSpeed:(CGFloat)playbackSpeed section:(NSString *)section {
-    self.playerVCtrl.playbackSpeed = playbackSpeed;
-    NSMutableDictionary *info = [NSMutableDictionary dictionaryWithCapacity:2];
-    info[TTVPlayerActionInfo_BOOL] = @(NO);
-    info[@"section"] = section;
-    [self.playerVCtrl.playerStore dispatch:[[TTVReduxAction alloc] initWithType:TTVPlayerActionType_ChangeSpeed info:info]];
+- (void)setDisableDislike:(BOOL)disableDislike {
+    _disableDislike = disableDislike;
+    self.dislikeItem.hidden = disableDislike;
+    [self setNeedsLayout];
 }
 
-- (NSString *)encryptedDecryptionKey {
-    return [self videoEngine].encryptedDecryptionKey;
+- (void)refreshButtonState {
+    //禁止收藏
+    BOOL disableFav = NO;
+    
+    //如果收藏了,收藏状态要&1
+    self.collectBtn.disableAnimation = YES;
+    self.collectBtn.selected = self.collected;
+    self.collectBtn.hidden = !self.collectBtn.selected;
+    self.collectNormalBtn.hidden = self.collectBtn.selected;
+    self.collectBtn.disableAnimation = NO;
+    self.collectLabel.text = self.collectBtn.selected ? @"已收藏" : @"收藏";
+    self.collectLabel.highlighted = self.collectBtn.selected;
+    [self.collectLabel sizeToFit];
+    self.collectLabel.height = 18;
+    self.collectLabel.centerX = self.collectBtn.centerX;
+    self.collectLabel.top = self.collectBtn.bottom + 6;
+    
+    [[TTVAlbumUtil sharedInstance] setButton:self.collectBtn disabled:(disableFav && !self.collected) action:^{
+        if (disableFav) {
+            [TTIndicatorView showWithIndicatorStyle:TTIndicatorViewStyleImage indicatorText:@"本视频暂不支持收藏" indicatorImage:nil autoDismiss:YES dismissHandler:nil];
+        }
+    }];
+    
+    [[TTVAlbumUtil sharedInstance] setButton:self.collectNormalBtn disabled:(disableFav && !(self.collected)) action:^{
+        if (disableFav) {
+            [TTIndicatorView showWithIndicatorStyle:TTIndicatorViewStyleImage indicatorText:@"本视频暂不支持收藏" indicatorImage:nil autoDismiss:YES dismissHandler:nil];
+        }
+    }];
+    
+    //禁止缓存
+    BOOL disableDownload = self.disableDownload;
+    UIImage *image = disableDownload ? [UIImage xigBizPlayerImageNamed:@"player_ban_download"] : [UIImage xigBizPlayerImageNamed:@"player_download"];
+    [self.downloadBtn setImage:image forState:UIControlStateNormal];
+    
+    UIImage *downloadImage = disableDownload ? [UIImage imageNamed:@"audio_download_disable"] : [UIImage imageNamed:@"audio_download_enable"];
+    [self.videoDownloadBtn setImage:downloadImage forState:UIControlStateNormal];
+    
+    //TODO: 短视频好像没有这个逻辑?
+    //禁止分享
+    BOOL disableShare = NO;
+    
+    [[TTVAlbumUtil sharedInstance] setButton:self.shareBtn disabled:disableShare action:^{
+        if (disableShare) {
+            [TTIndicatorView showWithIndicatorStyle:TTIndicatorViewStyleImage indicatorText:@"本视频暂不支持分享" indicatorImage:nil autoDismiss:YES dismissHandler:nil];
+            return;
+        }
+    }];
+    //刷新audioPlayBtn 状态
+    self.audioPlayBtn.selected = self.audioPlayBtnIsSelected;
+    self.audioPlayBtnLabel.highlighted = self.audioPlayBtn.selected;
+    
 }
 
-- (void)setEncryptedDecryptionKey:(NSString *)encryptedDecryptionKey {
-    [[self videoEngine] setEncryptedDecryptionKey:encryptedDecryptionKey];
+#pragma mark - event response
+- (void)skipSwitchClick:(id)sender {
+//    if (self.switchDidChanged) {
+//        self.switchDidChanged(self.skipSwitch.isOn);
+//    }
 }
 
-- (id<TTVideoEngineDelegate>)engineDelegate {
-    return [self videoEngine].delegate;
+- (void)volumeDidChanged:(id)sender {
+    if (self.volumeDidChanged) {
+        self.volumeDidChanged(self.volumeSlider.value);
+    }
 }
 
-- (void)setEngineDelegate:(id<TTVideoEngineDelegate>)engineDelegate {
-    [self videoEngine].delegate = engineDelegate;
+- (void)volumeEndChanged:(id)sender {
+    if (self.volumeEndChanged) {
+        self.volumeEndChanged(self.volumeSlider.value);
+    }
 }
 
-- (void)setEngineObserverState:(TTVPlayerEngineObserverState *)engineObserverState {
-    objc_setAssociatedObject(self, @selector(engineObserverState), engineObserverState, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+- (void)brightnessDidChanged:(id)sender {
+    if (self.brightnessDidChanged) {
+        self.brightnessDidChanged(self.brightnessSlider.value);
+    }
 }
 
-- (TTVPlayerEngineObserverState *)engineObserverState {
-    return objc_getAssociatedObject(self, @selector(engineObserverState));
+- (void)brightnessEndChanged:(id)sender{
+    if (self.brightnessEndChanged) {
+        self.brightnessEndChanged(self.brightnessSlider.value);
+    }
 }
 
-- (void)setEnableBackgroundPlay:(BOOL)enableBackgroundPlay {
-    [self.playerVCtrl setSupportBackgroundPlayback:enableBackgroundPlay];
-    [self.playerVCtrl.playerStore dispatch:[TTVPlayerAction actionWithType:TTVPlayerActionType_Background info:@{TTVPlayerActionInfo_BackgroudEnable:@(enableBackgroundPlay)}]];
+- (void)downloadAction:(id)sender {
+    if (self.downloadAction) {
+        self.downloadAction();
+    }
 }
 
-- (BOOL)enableBackgroundPlay {
-    return self.playerVCtrl.playerState.audioModeState.enableBackground;
+- (void)videoDownloadAction:(id)sender {
+    if (self.videoDownloadAction) {
+        self.videoDownloadAction();
+    }
 }
 
-- (void)setDisableHDR:(BOOL)disableHDR {
-    self.playerVCtrl.disableHDR = disableHDR;
-    objc_setAssociatedObject(self, @selector(disableHDR), @(disableHDR), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+- (void)noEdgeAction:(id)sender {
+    self.noEdgeBtn.selected = !self.noEdgeBtn.selected;
+    self.noEdgeBtnLabel.highlighted = self.noEdgeBtn.selected;
+    if (self.zoomBtnAction) {
+        self.zoomBtnAction(self.noEdgeBtn.selected);
+    }
 }
 
-- (BOOL)disableHDR {
-    return [objc_getAssociatedObject(self, @selector(disableHDR)) boolValue];
+- (void)eiBtnAction:(id)sender {
+    self.eiBtn.selected = !self.eiBtn.selected;
+    self.eiBtnLabel.highlighted = self.eiBtn.selected;
+    if (self.eiAction) {
+        self.eiAction(self.eiBtn.selected);
+    }
 }
 
-- (void)setHasCloseAsync:(BOOL)hasCloseAsync {
-    objc_setAssociatedObject(self, @selector(hasCloseAsync), @(hasCloseAsync), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+- (void)audioModePlayAction:(id)sender {
+    self.audioPlayBtn.selected = !self.audioPlayBtn.selected;
+    self.audioPlayBtnLabel.highlighted = self.audioPlayBtn.selected;
+    if(self.audioModePlayAction){
+        self.audioModePlayAction();
+    }
+    if(!self.disableZoomming) { //只有视频允许进行满屏处理时，才需要结合音频模式进行设置。
+        [[TTVAlbumUtil sharedInstance] setButton:self.noEdgeBtn disabled:self.audioPlayBtn.selected action:^{ }];
+    }
 }
-- (BOOL)hasCloseAsync {
-    return [objc_getAssociatedObject(self, @selector(hasCloseAsync)) boolValue];
+
+- (void) feedBackAction:(id)sender {
+    if(self.videoReportAction) {
+        self.videoReportAction();
+    }
+}
+
+- (void)collectAction:(id)sender {
+    //无网不请求，也不更改收藏状态，和短视频一致
+    if (!TTNetworkConnected()) {
+        [TTIndicatorView showWithIndicatorStyle:TTIndicatorViewStyleImage indicatorText:@"没有网络" indicatorImage:[UIImage themedImageNamed:@"close_popup_textpage"] autoDismiss:YES dismissHandler:nil];
+        return;
+    }
+    
+    self.collectBtn.selected = !self.collectBtn.selected;
+    self.collectLabel.text = self.collectBtn.selected ? @"已收藏" : @"收藏";
+    self.collectLabel.highlighted = self.collectBtn.selected;
+    [self.collectLabel sizeToFit];
+    self.collectLabel.height = 18;
+    self.collectLabel.centerX = self.collectBtn.centerX;
+    
+    self.collectBtn.hidden = !self.collectBtn.selected;
+    self.collectNormalBtn.hidden = self.collectBtn.selected;
+    
+    // 取消收藏后
+    BOOL disableFav = NO;
+    [[TTVAlbumUtil sharedInstance] setButton:self.collectBtn disabled:disableFav action:^{
+        if (disableFav) {
+            [TTIndicatorView showWithIndicatorStyle:TTIndicatorViewStyleImage indicatorText:@"本视频暂不支持收藏" indicatorImage:nil autoDismiss:YES dismissHandler:nil];
+        }
+    }];
+    
+    [[TTVAlbumUtil sharedInstance] setButton:self.collectNormalBtn disabled:disableFav action:^{
+        if (disableFav) {
+            [TTIndicatorView showWithIndicatorStyle:TTIndicatorViewStyleImage indicatorText:@"本视频暂不支持收藏" indicatorImage:nil autoDismiss:YES dismissHandler:nil];
+        }
+    }];
+    
+    if (self.collectAction) {
+        self.collectAction(self.collectBtn.selected);
+    }
+}
+
+- (void)shareAction:(id)sender {
+    if (self.shareAction) {
+        self.shareAction();
+    }
+}
+
+- (void)danmakuSettingTouchUpInside:(UIButton *)button {
+    if (self.danmakuSettingAction) {
+        self.danmakuSettingAction();
+    }
+}
+
+static char kPlayerFunctionMainSwitchStoreBrightnessStateKey;
+static char kPlayerFunctionMainSwitchStoreVolumeStateKey;
+- (void)setIsPresented:(BOOL)isPresented {
+    _isPresented = isPresented;
+    if (isPresented) {
+        objc_setAssociatedObject([TTPlayerFunctionMainSwitch sharedInstance], &kPlayerFunctionMainSwitchStoreBrightnessStateKey, @([TTPlayerFunctionMainSwitch sharedInstance].enableBrightnessView), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject([TTPlayerFunctionMainSwitch sharedInstance], &kPlayerFunctionMainSwitchStoreVolumeStateKey, @([TTPlayerFunctionMainSwitch sharedInstance].enableVolumeView), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [TTPlayerFunctionMainSwitch sharedInstance].enableBrightnessView = NO;
+        [TTPlayerFunctionMainSwitch sharedInstance].enableVolumeView = NO;
+    } else {
+        NSNumber *storeBrightnessView = objc_getAssociatedObject([TTPlayerFunctionMainSwitch sharedInstance], &kPlayerFunctionMainSwitchStoreBrightnessStateKey);
+        if ([storeBrightnessView isKindOfClass:[NSNumber class]]) {
+            [TTPlayerFunctionMainSwitch sharedInstance].enableBrightnessView = [storeBrightnessView boolValue];
+        }
+        NSNumber *storeVolumeView = objc_getAssociatedObject([TTPlayerFunctionMainSwitch sharedInstance], &kPlayerFunctionMainSwitchStoreVolumeStateKey);
+        if ([storeVolumeView isKindOfClass:[NSNumber class]]) {
+            [TTPlayerFunctionMainSwitch sharedInstance].enableVolumeView = [storeVolumeView boolValue];
+        }
+        objc_setAssociatedObject([TTPlayerFunctionMainSwitch sharedInstance], &kPlayerFunctionMainSwitchStoreBrightnessStateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject([TTPlayerFunctionMainSwitch sharedInstance], &kPlayerFunctionMainSwitchStoreVolumeStateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
 }
 
 #pragma mark - public method
-- (void)setupVideoEngine {
-    [self resetVideoEngine];
+- (void)setSwitchOn:(BOOL)isOn volumeProgress:(CGFloat)volumeProgress brightnessProgress:(CGFloat)brightnessProgress {
+//    self.skipSwitch.on = isOn;
+    self.volumeSlider.value = volumeProgress;
+    self.brightnessSlider.value = brightnessProgress;
 }
 
-- (void)resetVideoEngine {
-    if (![self videoEngine] || self.hasCloseAsync) {
-        self.hasCloseAsync = NO;
-        [self.playerVCtrl resetVideoEngine];
-    }
-    self.engineObserverState = [TTVPlayerEngineObserverState observerStateForVideoEngine:[self videoEngine]];
-    TTVideoEngine *videoEngine = [self videoEngine];
-    videoEngine.hardwareDecode = [SSCommonLogic hardwareDecodeEnabled];
-    [self setOptionForKey:VEKKeyPlayerH265Enabled_BOOL value:@([SSCommonLogic videoPlayerH265Enable] ?: NO)];
-    [self setOptionForKey:VEKKeyPlayerKsyHevcDecode_BOOL value:@([SSCommonLogic videoPlayerH265Enable] ?: NO)];
-    [self setOptionForKey:VEKKeyPlayerBoeEnabled_BOOL value:@(ttv_boeEnviEnable())];
-    [self setOptionForKey:VEKKeyPlayerSeekEndEnabled_BOOL value:@(YES)];
-
-    if (self.isLongVideo) {
-        // 长视频的预加载预置settings
-        NSDictionary *dic = [[TTSettingsManager sharedManager] settingForKey:@"video_lvideo_config" defaultValue:@{} freeze:NO];
-        if ([[dic allKeys] containsObject:@"video_enable_preload"] && [[dic valueForKey:@"video_enable_preload"] boolValue]) {
-            videoEngine.proxyServerEnable = YES;
-            [self setOptionForKey:VEKKeyModelCacheVideoInfoEnable_BOOL value:@(YES)];
-        } else {
-            videoEngine.proxyServerEnable = NO;
-            [self setOptionForKey:VEKKeyModelCacheVideoInfoEnable_BOOL value:@(NO)];
-        }
-    } else {
-        // 短视频预加载实验settings
-        videoEngine.proxyServerEnable = [SSCommonLogic preloadVideoEnabled];
-        [self setOptionForKey:VEKKeyModelCacheVideoInfoEnable_BOOL value:@([SSCommonLogic preloadVideoEnabled])];
-    }
-//    if(self.openRadioMode) {
-//        //videoEngine 开启音频模式
-//        videoEngine.radioMode = YES;
-//    }
-
-    BOOL metalEnable = [[[TTSettingsManager sharedManager] settingForKey:@"video_player_flag" defaultValue:@{} freeze:NO] tt_boolValueForKey:@"metal_enable"];
-    if (metalEnable && [TTVideoEngine isSupportMetal]) {
-        [self setOptionForKey:VEKKeyViewRenderEngine_ENUM value:@(TTVideoEngineRenderEngineMetal)];
-    }
-    // 是否开启DNS缓存
-    [self setOptionForKey:VEKKeyPlayerDnsCacheEnabled_BOOL value:@([[[TTSettingsManager sharedManager] settingForKey:@"video_player_flag" defaultValue:@{} freeze:NO] tt_boolValueForKey:@"dns_cache_enable"])];
-    
-    [self.playerVCtrl.playerStore dispatch:[self.playerVCtrl.playerAction resetEngineOnBusinessLevel]];
-}
-
-- (void)addEngineBehaviorObserver:(id<TTVPlayerEngineBehaviorProtocol>)observer {
-    NSAssert(observer && [observer conformsToProtocol:@protocol(TTVPlayerEngineBehaviorProtocol)], @"observer不存在或有未实现的协议方法");
-    [self.engineBehaviorObservers addObject:observer];
-}
-
-- (void)removeEngineBehaviorObserver:(id<TTVPlayerEngineBehaviorProtocol>)observer {
-    NSAssert(observer && [observer conformsToProtocol:@protocol(TTVPlayerEngineBehaviorProtocol)], @"observer不存在或有未实现的协议方法");
-    if ([self.engineBehaviorObservers containsObject:observer]) {
-        [self.engineBehaviorObservers removeObject:observer];
+- (void)updateVolumeProgress:(CGFloat)volumeProgress {
+    if (!self.volumeSlider.isTracking) {
+        self.volumeSlider.value = volumeProgress;
     }
 }
 
-- (BOOL)hasVideoEngine {
-    return YES;
-}
-
-- (void)play {
-    if (![self canPlay]) {
-        return;
-    }
-    [self sendPlayStartTrack];
-    [self pauseTimingForKey:@"ClickToPlay"];
-    if (![self hasTimingForKey:[NSString stringWithFormat:@"%p-FirstFrame", self.playerVCtrl]]) {
-        [self playerStartTimingForKey:[NSString stringWithFormat:@"%p-FirstFrame", self.playerVCtrl]];
-    }
-    [self.playerVCtrl play];
-}
-
-- (void)prepareToPlay {
-    [self.playerVCtrl prepareToPlay];
-}
-
-- (void)pause {
-    [self.playerVCtrl pause];
-}
-
-- (void)pauseAsync:(BOOL)async {
-    [self.playerVCtrl pauseAsync:async];
-}
-
-- (void)stop {
-    [self.playerVCtrl stop];
-}
-
-- (void)closeAsync {
-    if (self.hasCloseAsync) {
-        return;
-    }
-    [self.playerVCtrl closeAysnc];
-    self.hasCloseAsync = YES;
-}
-
-- (void)isOnlyPlayAudio {
-    BOOL enableAudioPlay = ttvs_enableAudioPlayMode();
-    if(!enableAudioPlay) return;
-    if(![self.playerVCtrl partForKey:TTVPlayerPartKey_Audio]) {
-        [self.playerVCtrl addPartFromConfigForKey:TTVPlayerPartKey_Audio];
-    }
-    //TODO:在这里设置就要求短视频入口一定要是这里，或许有更好的地方设置。短视频设置音频按钮隐藏
-    if (!self.playerVCtrl.playerState.audioModeState.hiddenAudioButtonOnControl) {
-        [self.playerVCtrl.playerStore dispatch:[TTVPlayerAction actionWithType:TTVPlayerActionType_AudioButtonHidden info:@{TTVPlayerActionInfo_AudioButtonHidden:@(YES)}]];
-    }
-    
-    [self.playerVCtrl.playerStore dispatch:[TTVPlayerAction actionWithType:TTVPlayerActionType_AudioClick info:@{}]];
-    //NOTE：开启连续视频播放且启用“定时关闭”功能时，由于详情页中不同视频使用的不是同一个播放器。需要记住上个视频播放完成后剩余的时间。下个视频开播前设置剩余时间。
-    if(self.audioPlayCountdown > 0) {
-        NSMutableDictionary *taskModelDic = [NSMutableDictionary dictionary];
-        taskModelDic[@"turnOn"] = @(YES);
-        taskModelDic[@"singleMode"] = @(NO);
-        taskModelDic[@"duration"] = @(self.audioPlayCountdown);
-        taskModelDic[@"isCustomSeleted"] = @(YES);
-        [self.playerVCtrl.playerStore dispatch:[TTVPlayerAction actionWithType:TTVPlayerActionType_TimerTaskSelected info:@{@"taskModelDic":taskModelDic}]];
+- (void)dislikeBtnAction:(id)sender{
+    if (self.dislikeAction) {
+        self.dislikeAction();
     }
 }
 
-- (CGFloat)currentPlayerProgress {
-    return self.playerVCtrl.playerState.playbackTime.progress;
-}
-
-- (NSArray<NSNumber *> *)supportedResolutionTypes {
-    NSMutableArray<NSNumber *> *supportedResolutionTypes = [[self.playerVCtrl supportedResolutionTypes] mutableCopy];
-    //如果外部业务控制强制关闭HDR，那么需要关闭
-    if (self.disableHDR) {
-        for (NSInteger i=0; i<supportedResolutionTypes.count; i++) {
-            if (supportedResolutionTypes[i].integerValue == TTVideoEngineResolutionTypeHDR) {
-                [supportedResolutionTypes removeObjectAtIndex:i];
-            }
-        }
-    }
-    return supportedResolutionTypes;
-}
-
-- (void)removeTimeObserver {
-    [[self videoEngine] removeTimeObserver];
-}
-
-- (id)getOptionBykey:(VEKKeyType)key {
-    return [self.playerVCtrl getOptionBykey:key];
-}
-
-- (void)setOptionForKey:(NSInteger)key value:(id)value {
-    [self.playerVCtrl setOptionForKey:key value:value];
-}
-
-- (void)setProxyServerEnable:(BOOL)proxyServerEnable {
-    [[self videoEngine] setProxyServerEnable:proxyServerEnable];
-}
-
-- (NSInteger)getVideoWidth {
-    return [self.playerVCtrl getVideoWidth];
-}
-
-- (NSInteger)getVideoHeight {
-    return [self.playerVCtrl getVideoHeight];
-}
-
-- (void)configResolution:(TTVideoEngineResolutionType)resolution {
-    [self.playerVCtrl configResolution:(TTVPlayerResolutionTypes)resolution completion:nil];
-}
-
-- (void)configResolution:(TTVideoEngineResolutionType)resolution completion:(void(^)(BOOL success, TTVideoEngineResolutionType completeResolution))completion {
-    if (completion) {
-        void (^didResolutionChanged)(TTVideoEngineResolutionType resolution);
-        if (self.controlsResolutionDidChanged) {
-            didResolutionChanged = [self.controlsResolutionDidChanged copy];
-        }
-        self.controlsResolutionDidChanged = ^(TTVideoEngineResolutionType resolution) {
-            if (completion) {
-                completion(YES, resolution);
-            }
-            if (didResolutionChanged) {
-                didResolutionChanged(resolution);
-            }
-        };
-    }
-    [self switchResolution:resolution afterDegrade:NO];
-}
-
-/// Using media loader,the size of hit cache.
-/// @param player player instance
-/// @param key The task key of using media loader
-/// @param cacheSize hit cache size.
-- (void)player:(TTVPlayer *)player mdlKey:(NSString *)key hitCacheSze:(NSInteger)cacheSize {
-    BOOL isHitCache = NO;
-    NSInteger hitCacheSize = 0;
-    TTVideoEngineURLInfo *info = [self.videoInfo videoInfoForType:(TTVideoEngineResolutionType)self.currentResolution];
-    if(info != nil){
-        NSString *temFilehash = [info getValueStr:VALUE_FILE_HASH];
-        if ([temFilehash isEqualToString:key]) {
-            isHitCache = YES;
-            hitCacheSize = cacheSize;
-        }
-    }
-    [self qosPlayerTracker].isHitCache = isHitCache;
-    [self qosPlayerTracker].hitCacheSize = hitCacheSize;
-}
-
-- (void)setCurrentPlaybackTime:(NSTimeInterval)currentPlaybackTime complete:(void(^)(BOOL success))finised {
-    [self.hookPlaybackBlockBefore enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull obj, BOOL * _Nonnull stop) {
-        void (^block)(NSArray *) = obj;
-        NSMutableArray *argumentsArr = [[NSMutableArray alloc] initWithCapacity:2];
-        [argumentsArr addObject:@(currentPlaybackTime)];
-        [argumentsArr btd_addObject:finised];
-        if (block) {
-            block([argumentsArr copy]);
-        }
-    }];
-    @weakify(self);
-    [self.playerVCtrl setCurrentPlaybackTime:currentPlaybackTime complete:^(BOOL success) {
-        @strongify(self);
-        if (success) {
-            [self.danmakuAdapter playerSeeked];
-        }
-        if (finised) {
-            finised(success);
-        }
-    }];
-    [self.hookPlaybackBlockAfter enumerateKeysAndObjectsUsingBlock:^(id  _Nonnull key, id  _Nonnull obj, BOOL * _Nonnull stop) {
-        void (^block)(NSArray *) = obj;
-        NSMutableArray *argumentsArr = [[NSMutableArray alloc] initWithCapacity:2];
-        [argumentsArr addObject:@(currentPlaybackTime)];
-        [argumentsArr btd_addObject:finised];
-        if (block) {
-            block([argumentsArr copy]);
-        }
-    }];
-}
-
-- (void)setLocalURL:(NSString *)localURL {
-    [self.playerVCtrl setLocalURL:localURL];
-}
-
-- (NSString *)localURL{
-    return [self.playerVCtrl localURL];
-}
-
-- (BOOL)looping {
-    return self.playerVCtrl.looping;
-}
-
-- (void)setLooping:(BOOL)looping {
-    self.playerVCtrl.looping = looping;
-}
-
-- (void)setDirectPlayURL:(NSString *)directPlayURL {
-    [self.playerVCtrl setDirectPlayURL:directPlayURL];
-}
-
-- (NSString *)directPlayURL{
-    return [self.playerVCtrl directPlayURL];
-}
-
-- (void)setDrmCreater:(DrmCreater)drmCreater {
-    [self.playerVCtrl setDrmCreater:drmCreater];
-}
-
-- (void)setOpenTimeOut:(NSInteger)timerOut
-{
-    if (timerOut > 0) {
-        [self.playerVCtrl setOptionForKey:VEKKeyPlayerOpenTimeOut_NSInteger value:@(timerOut)];
+- (void)reportBtnAction:(id)sender{
+    if (self.reportAction) {
+        self.reportAction();
     }
 }
 
-#pragma mark - private method
-- (BOOL)canPlay {
-    //播放器回收复用，会延时使用closeAys节省播放器重置耗时，所以判断如果正在回收中，不能播放，重置完会重置该变量
-    if (self.isPlayerRecycling) {
-        return NO;
-    }
-    if (self.viewModel.aID.integerValue != 0) {
-        return YES;
-    }
-    if (self.screenCastCloseButtonClicked) {
-        self.screenCastCloseButtonClicked = NO;
-        return YES;
-    }
-    if (self.shouldPlayByInnerScreenCast) {
-        self.shouldPlayByInnerScreenCast = NO;
-        [self pause];
-        return NO;
-    }
-    if (self.isScreenCasting) {
-        return NO;
-    }
-    if (self.screenCastViewIsShowing) {
-        [self pause];
-        return NO;
-    }
-    return YES;
+- (void)hideEIButton:(BOOL)hidden {
+    self.eiBtn.hidden = hidden;
+    self.eiBtnLabel.hidden = hidden;
 }
 
-- (NSHashTable *)engineBehaviorObservers {
-    NSHashTable *hashTable = objc_getAssociatedObject(self, @selector(engineBehaviorObservers));
-    if (!hashTable) {
-        hashTable = [NSHashTable weakObjectsHashTable];
-        objc_setAssociatedObject(self, @selector(engineBehaviorObservers), hashTable, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+- (void)setAudioPlayBtnIsSelected:(BOOL)audioPlayBtnIsSelected {
+    _audioPlayBtnIsSelected = audioPlayBtnIsSelected;
+    self.audioPlayBtn.selected = _audioPlayBtnIsSelected;
+    self.audioPlayBtnLabel.highlighted = self.audioPlayBtn.selected;
+    if(audioPlayBtnIsSelected) {
+        [[TTVAlbumUtil sharedInstance] setButton:self.noEdgeBtn disabled:audioPlayBtnIsSelected action:^{ }];
     }
-    return hashTable;
 }
 
-- (void)engineBehaviorCallbackForSelector:(SEL)selector withObjects:(id)object,... {
-    for (id<TTVPlayerEngineBehaviorProtocol> observer in self.engineBehaviorObservers.allObjects) {
-        if (observer && ![observer isKindOfClass:[NSNull class]]) {
-            if ([observer respondsToSelector:selector]) {
-                NSMethodSignature *signature = [[observer class] instanceMethodSignatureForSelector:selector];
-                if (signature == nil) {
-                    NSAssert(NO, @"找不到 %@ 方法", NSStringFromSelector(selector));
-                }
-                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                invocation.target = observer;
-                invocation.selector = selector;
-                NSInteger paramsCount = signature.numberOfArguments - 2;
-                // 设置参数
-                va_list params;
-                va_start(params, object);
-                int i = 0;
-                for (id tmpObject = object; i < paramsCount; i++) {
-                    [invocation setArgument:&tmpObject atIndex:i + 2];
-                    if (i < paramsCount - 1) {
-                        tmpObject = va_arg(params, id);
-                    }
-                }
-                va_end(params);
-                [invocation retainArguments];
-                // 调用方法
-                [invocation invoke];
-            }
+- (void)setHasSeries:(BOOL)hasSeries{
+    _hasSeries = hasSeries;
+    self.loopSettingView.hasSeries = hasSeries;
+}
+
+@end
+
+@interface TTPlayerLoopSettingView ()
+
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) NSArray<UIButton *> *selectionItemBtns;
+
+@end
+
+@implementation TTPlayerLoopSettingView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        self.backgroundColor = [UIColor clearColor];
+        
+        _titleLabel = [[UILabel alloc] init];
+        _titleLabel.text = @"循环播放:";
+        _titleLabel.textColor = [UIColor tt_W4_color];
+        _titleLabel.font = [UIFont systemFontOfSize:13.f weight:UIFontWeightRegular];
+        [_titleLabel sizeToFit];
+        [self addSubview:_titleLabel];
+        
+        NSArray *list = @[@"不循环", @"单集循环"];
+        NSMutableArray *buttonArray = [NSMutableArray array];
+        [list enumerateObjectsUsingBlock:^(NSString *title, NSUInteger idx, BOOL * _Nonnull stop) {
+            UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+            [button setTitle:title forState:UIControlStateNormal];
+            [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            [button setTitleColor:[UIColor redColor] forState:UIControlStateSelected];
+            button.titleLabel.font = [UIFont systemFontOfSize:13.f weight:UIFontWeightSemibold];
+            [button addTarget:self action:@selector(onClick:) forControlEvents:UIControlEventTouchUpInside];
+            button.hitTestEdgeInsets = UIEdgeInsetsMake(-12, -12, -12, -12);
+            button.tag = idx;
+            [button sizeToFit];
+            [self addSubview:button];
+            [buttonArray addObject:button];
+        }];
+        self.selectionItemBtns = [buttonArray copy];
+    }
+    return self;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat rate = [UIDevice btd_isScreenWidthLarge320] ? 1.0f:0.9f;
+    self.titleLabel.left = 24;
+    self.titleLabel.centerY = self.height / 2;
+    UIView *preView = self.titleLabel;
+    for (UIView *view in self.selectionItemBtns) {
+        if (!view.hidden) {
+            view.left = preView.right + 32 * rate;
+            view.centerY = self.height / 2;
+            preView = view;
         }
     }
 }
 
-#pragma mark - Debug Tool
-- (BOOL)videoDebugViewIsShowing {
-    return [self.playerVCtrl videoDebugViewIsShowing];
+- (void)onClick:(UIButton *)sender {
+    self.loopingType = sender.tag;
+    if (self.loopingTypeChanged) {
+        self.loopingTypeChanged(sender.tag);
+    }
 }
 
-- (void)showDebugViewInView:(UIView *)hudView indexInhudView:(NSInteger)index {
-    [self.playerVCtrl showDebugViewInView:hudView indexInhudView:index];
+- (void)setLoopingType:(NSInteger)loopingType {
+    _loopingType = loopingType;
+    for (UIButton *btn in self.selectionItemBtns) {
+        btn.selected = (btn.tag == loopingType);
+        btn.userInteractionEnabled = !btn.selected;
+        btn.titleLabel.font = btn.selected ? [UIFont systemFontOfSize:13.f weight:UIFontWeightSemibold]:[UIFont systemFontOfSize:13.f weight:UIFontWeightRegular];
+    }
 }
 
-- (void)hideDebugView {
-    [self.playerVCtrl hideDebugView];
+- (void)setHasSeries:(BOOL)hasSeries{
+    _hasSeries = hasSeries;
+    if(hasSeries){
+        NSString* title = @"合集循环";
+        NSMutableArray* itemButtons = [self.selectionItemBtns mutableCopy];
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+        [button setTitle:title forState:UIControlStateNormal];
+        [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [button setTitleColor:[UIColor redColor] forState:UIControlStateSelected];
+        button.titleLabel.font = [UIFont systemFontOfSize:13.f weight:UIFontWeightSemibold];
+        [button addTarget:self action:@selector(onClick:) forControlEvents:UIControlEventTouchUpInside];
+        button.hitTestEdgeInsets = UIEdgeInsetsMake(-12, -12, -12, -12);
+        button.tag = itemButtons.count;
+        [button sizeToFit];
+        [self addSubview:button];
+        [itemButtons addObject:button];
+        self.selectionItemBtns = [itemButtons copy];
+    }
 }
-
-- (void)removeDebugView {
-    [self.playerVCtrl removeDebugView];
-}
-
-- (void)showDebugView {
-    [self.playerVCtrl showDebugView];
-}
-
-- (void)setDebugViewIsFullScreen:(BOOL)isFullScreen {
-    [self.playerVCtrl setDebugViewIsFullScreen:isFullScreen];
-}
-
 
 @end
