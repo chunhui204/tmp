@@ -75,8 +75,6 @@
 #import <TTQualityStat/TTQualityStat.h>
 #import <XIGBizPlayer/XIGBizPlayerConst.h>
 
-#import "TTVLoopingPlayManager.h"
-
 #define kAdDetailButtonGap 6
 
 extern CGFloat kMinHeightForMovieContainerView;
@@ -704,7 +702,7 @@ TTPlayerGestureControllerPanGestStatusDelegate
         [[TTQualityStat shareStat] onSceneFinish:TTVShortVideoDetailVideoLoad description:desc];
 //        [TTVQualityManager finishLoadWithScene:TTVShortVideoDetailVideoLoad error:error description:extraDic];
         
-    }
+    }//播放结束
     else if (playerViewController.viewModel.isPlaybackEnded) {
         
         if (playerViewController.looping == TTVLoopingTypeSingle) {
@@ -769,7 +767,7 @@ TTPlayerGestureControllerPanGestStatusDelegate
                         [self _buildLongVideoFinishViewForPlayerViewController:playerViewController];
                     }
 
-                } else {
+                } else {//合集播放结束
                     [self _buildFinishControlViewForPlayerViewController:playerViewController];
                 }
             }
@@ -793,10 +791,6 @@ TTPlayerGestureControllerPanGestStatusDelegate
                 playerViewController.enableFullScreen = NO;
             }
             
-            //播放结束显示保存到相册
-            NSDictionary *shareposterConfig = [[TTSettingsManager sharedManager] settingForKey:@"ug_share_config" defaultValue:@{} freeze:NO];
-            BOOL isShowFinishDownload = [shareposterConfig btd_intValueForKey:@"share_panel_video_download_switch_position" default:0];
-            
             //短带长后贴出现时禁止旋转
             if (self.longFinishView && !self.longFinishView.hidden) {
                 playerViewController.enableFullScreen = NO;
@@ -806,9 +800,6 @@ TTPlayerGestureControllerPanGestStatusDelegate
                 if (self.orderedData.article.praiseInfo.praiseEnable) {
                     //可以赞赏
                     [self.finishControlView.finishView showWithStyle:TTPlayerCustomFinishViewStyle_shareWithPraise];
-                } else if(!self.videoDisableDownload && isShowFinishDownload){
-                    //可以保存到相册
-                    [self.finishControlView.finishView showWithStyle:TTPlayerCustomFinishViewStyle_shareWithDownload];
                 }
             }
         } else if ((playerViewController.immerseEnable
@@ -1335,11 +1326,6 @@ TTPlayerGestureControllerPanGestStatusDelegate
         self.playerViewController.blockMonitoring = NO;
         WeakSelf;
         [self.playerViewController setFullScreen:YES animated:YES completion:^(BOOL finish) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"showSafeLoginWindow" object:nil userInfo:nil];
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"showOneKeyWindow" object:nil userInfo:nil];
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"showAwemeWindow" object:nil userInfo:nil];
-            });
             StrongSelf;
             if (needShowCommentView) {
                 [[TTVPlayerFullScreenManager sharedInstance] showCommentViewIn:self.playerViewController article:self.state.detailModel.article trackerParams:nil animated:NO];
@@ -1444,7 +1430,7 @@ TTPlayerGestureControllerPanGestStatusDelegate
     self.playerViewController.viewModel.commonExtraTrackers = [mutablePlayerViewModel copy];
     
     self.playerViewController.showControlsTitle = NO;
-    self.playerViewController.showsTitleShadow = self.playerViewController.isFullScreen;
+    self.playerViewController.showsTitleShadow = NO;
     self.playerViewController.delegate = self;
     [self.playerViewController addPlayerAdapterDelegate:self];
     
