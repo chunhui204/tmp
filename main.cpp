@@ -1,11 +1,6 @@
 #include <iostream>
 #include <stdlib.h>
 
-int main()
-{
-
-}
-
 using namespace std;
 
 class A
