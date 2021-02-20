@@ -3,22 +3,7 @@
 
 using namespace std;
 
-class A
-{
-public:
-	A()
-	{
-	}
-	
-	~A()
-	{
-	}
-};
-int main()
-{
-	cout << "Current Code edited by user host-win10" 
-		<< endl;
-	
+int main()	
 	cout << "Current Code edited by user host-linux-ubuntu"
 		<< endl;		
 	return 0;
